@@ -53,6 +53,14 @@ defmodule DrValidator.RunnerTest do
     def expected_data, do: nil
   end
 
+  # Calls exit/1 to simulate a validator that terminates via EXIT signal.
+  defmodule FakeExitValidator do
+    @behaviour DrValidator.AppValidator
+    def name, do: "fake-exit"
+    def run(_opts), do: exit(:test_kill)
+    def expected_data, do: nil
+  end
+
   # ---------------------------------------------------------------------------
   # Generators
   # ---------------------------------------------------------------------------
@@ -127,6 +135,23 @@ defmodule DrValidator.RunnerTest do
       for result <- report.apps do
         assert result.status == :failed
         assert result.error_message =~ "boom"
+      end
+    end
+  end
+
+  property "exit: validator that calls exit/1 yields :failed AppResult via Task.yield {:exit, reason} path" do
+    check all perimeter <- perimeter_gen() do
+      # Process.flag(:trap_exit, true) so the linked Task EXIT signal does not kill
+      # this test process; Task.yield then returns {:exit, reason} via the DOWN monitor.
+      Process.flag(:trap_exit, true)
+
+      report = Runner.run(perimeter, validator_lookup: uniform_lookup(FakeExitValidator))
+
+      for result <- report.apps do
+        assert result.status == :failed
+        # The {:exit, reason} arm formats as "crashed: #{inspect(reason)}"
+        # not "crashed: exit: ..." (which would come from the removed catch arm).
+        assert result.error_message == "crashed: :test_kill"
       end
     end
   end
