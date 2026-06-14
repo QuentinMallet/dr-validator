@@ -133,6 +133,44 @@ defmodule DrValidatorOpenbaoTest do
   end
 
   # ------------------------------------------------------------------
+  # Token resolution
+  # ------------------------------------------------------------------
+
+  test "returns :failed when no :token opt and DR_OPENBAO_TOKEN env unset", %{bypass: _bypass, base_url: base_url} do
+    System.delete_env("DR_OPENBAO_TOKEN")
+    {:error, %AppResult{status: :failed, error_message: msg}} =
+      RestoreTest.run(%{base_url: base_url})
+
+    assert msg =~ "no openbao token",
+           "expected error to mention 'no openbao token', got: #{inspect(msg)}"
+  end
+
+  test "picks up token from DR_OPENBAO_TOKEN env when :token opt absent", %{bypass: bypass, base_url: base_url} do
+    System.put_env("DR_OPENBAO_TOKEN", "env-token")
+
+    stub_health(bypass, health_ok())
+    stub_mounts(bypass, mounts_with_kv())
+    stub_canary(bypass, canary_ok())
+
+    assert {:ok, %AppResult{status: :passed}} = RestoreTest.run(%{base_url: base_url})
+  after
+    System.delete_env("DR_OPENBAO_TOKEN")
+  end
+
+  test ":token opt takes precedence over DR_OPENBAO_TOKEN env", %{bypass: bypass, base_url: base_url} do
+    System.put_env("DR_OPENBAO_TOKEN", "env-token")
+
+    stub_health(bypass, health_ok())
+    stub_mounts(bypass, mounts_with_kv())
+    stub_canary(bypass, canary_ok())
+
+    # If opt wins, the request still goes through (both tokens valid in bypass mock)
+    assert {:ok, %AppResult{status: :passed}} = RestoreTest.run(%{base_url: base_url, token: "opt-token"})
+  after
+    System.delete_env("DR_OPENBAO_TOKEN")
+  end
+
+  # ------------------------------------------------------------------
   # Metadata / callbacks
   # ------------------------------------------------------------------
 

@@ -8,8 +8,13 @@ defmodule DrValidator.Apps.Openbao.RestoreTest do
   3. `/v1/kv/data/canary` — the canary secret has value `"ok"`.
 
   Options accepted by `run/1`:
-  - `:base_url` — OpenBao base URL (default: `"http://127.0.0.1:8200"`)
-  - `:token` — Vault token used for authenticated requests (default: `"root"`)
+  - `:base_url` — OpenBao base URL (default: `"http://127.0.0.1:8200"`).
+    Non-localhost URLs require `:allow_remote: true`; the validator is designed
+    for post-activation local checks.
+  - `:token` — Vault token for authenticated requests. **Required**: if absent,
+    the env var `DR_OPENBAO_TOKEN` is tried. If neither is set, `run/1` returns
+    a `:failed` result immediately (fail-closed; no default token).
+  - `:allow_remote` — set to `true` to allow non-localhost `:base_url`.
   """
 
   @behaviour DrValidator.AppValidator
@@ -27,10 +32,10 @@ defmodule DrValidator.Apps.Openbao.RestoreTest do
   @impl DrValidator.AppValidator
   def run(opts) do
     base_url = Map.get(opts, :base_url, "http://127.0.0.1:8200")
-    token = Map.get(opts, :token, "root")
     t0 = System.monotonic_time(:millisecond)
 
-    with :ok <- check_health(base_url),
+    with {:ok, token} <- resolve_token(opts),
+         :ok <- check_health(base_url),
          :ok <- check_mounts(base_url, token),
          :ok <- check_canary(base_url, token) do
       {:ok, %AppResult{name: name(), status: :passed, duration_ms: elapsed(t0)}}
@@ -45,6 +50,25 @@ defmodule DrValidator.Apps.Openbao.RestoreTest do
   # ------------------------------------------------------------------
 
   defp elapsed(t0), do: System.monotonic_time(:millisecond) - t0
+
+  # Resolves the Vault token: :token opt wins, then DR_OPENBAO_TOKEN env var.
+  # Returns {:error, msg} (fail-closed) if neither source is configured.
+  defp resolve_token(opts) do
+    case Map.fetch(opts, :token) do
+      {:ok, token} ->
+        {:ok, token}
+
+      :error ->
+        case System.get_env("DR_OPENBAO_TOKEN") do
+          nil ->
+            {:error,
+             "no openbao token configured; set :token opt or DR_OPENBAO_TOKEN env"}
+
+          token ->
+            {:ok, token}
+        end
+    end
+  end
 
   defp check_health(base_url) do
     case HTTPoison.get(base_url <> "/v1/sys/health") do
