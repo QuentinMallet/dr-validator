@@ -1,24 +1,25 @@
 defmodule DrValidator.CLI do
   @moduledoc """
-  CLI entrypoint for escript invocation.
+  CLI entrypoint for escript and `mix dr_validator.run` invocation.
 
-  `main/1` is the escript entry point called with `System.argv()` by the
-  generated `dr-validator-run` binary. It is also invoked by the
-  `mix dr_validator.run` task so the two entrypoints share identical
-  arg-parsing and dispatch logic.
+  `main/1` parses `argv`, runs the validator pipeline, and returns an integer
+  exit code. It is called directly by the `mix dr_validator.run` Mix task and
+  by `DrValidator.EscriptMain.main/1` (which wraps it with `System.halt/1` so
+  the generated `dr-validator-run` binary exits with the correct `$?`).
 
   ## Exit codes
 
     - `0`  — all apps passed (`:passed`)
     - `1`  — at least one app failed, none partial (`:failed`)
     - `2`  — at least one app partial (`:partial`)
+    - `3`  — validation ran but the report could not be written to disk
     - `64` — usage error (missing required flag); sysexits.h EX_USAGE
 
   ## Flags
 
     - `--perimeter <id>`        (required) perimeter ID to validate
     - `--perimeters-path <p>`   override perimeters JSON file (default: env/system default)
-    - `--report-path <p>`       override report output path
+    - `--report-path <p>`       override report output path (must be writable; exit 3 on failure)
     - `--app-timeout-ms <n>`    per-app timeout in milliseconds
     - `--help`                  print usage and exit 0
   """
@@ -34,6 +35,13 @@ defmodule DrValidator.CLI do
     --report-path <p>       Path for JSON report output (default: /var/log/dr-validator/report.json)
     --app-timeout-ms <n>    Per-app timeout in ms (default: 300000)
     --help                  Show this help
+
+  Exit codes:
+    0   All apps passed
+    1   At least one app failed
+    2   At least one app partial
+    3   Validation ran but report write failed (check --report-path permissions)
+    64  Usage error (missing required flag)
   """
 
   @ex_usage 64
@@ -43,10 +51,10 @@ defmodule DrValidator.CLI do
   # ---------------------------------------------------------------------------
 
   @doc """
-  Escript entry point. Parses `argv`, runs the validator, returns exit code.
+  CLI entry point. Parses `argv`, runs the validator, returns exit code.
 
-  In escript context, call `System.halt(main(System.argv()))`.
-  In test context, call directly and assert on the returned integer.
+  In escript context, `DrValidator.EscriptMain.main/1` wraps this with
+  `System.halt/1`. In test context, call directly and assert on the integer.
   """
   @spec main([String.t()]) :: non_neg_integer()
   def main(argv) do
@@ -153,13 +161,24 @@ defmodule DrValidator.CLI do
 
     report = Runner.run(perimeter, runner_opts)
 
-    write_report(report, opts.report_path)
+    case write_report(report, opts.report_path) do
+      :ok ->
+        exit_code_for(report.overall_status)
 
-    exit_code_for(report.overall_status)
+      {:error, reason} ->
+        IO.puts(
+          :stderr,
+          "error: failed to write report to #{opts.report_path || "(default path)"}: #{inspect(reason)}"
+        )
+
+        3
+    end
   end
 
-  defp write_report(report, nil), do: ReportWriter.write(report)
-  defp write_report(report, path), do: ReportWriter.write(report, path)
+  defp write_report(report, path) do
+    writer = Application.get_env(:dr_validator, :report_writer, ReportWriter)
+    if path, do: writer.write(report, path), else: writer.write(report)
+  end
 
   defp maybe_put(kw, _key, nil), do: kw
   defp maybe_put(kw, key, value), do: Keyword.put(kw, key, value)
