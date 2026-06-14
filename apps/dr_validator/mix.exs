@@ -26,7 +26,8 @@ defmodule DrValidator.MixProject do
   defp deps do
     [
       {:jason, "~> 1.4"},
-      {:stream_data, "~> 1.0", only: [:test, :dev]}
+      {:stream_data, "~> 1.0", only: [:test, :dev]},
+      {:wallaby, "~> 0.30", only: [:test, :dev], runtime: false}
     ]
   end
 end
