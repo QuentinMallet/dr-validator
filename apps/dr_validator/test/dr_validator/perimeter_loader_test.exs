@@ -193,6 +193,63 @@ defmodule DrValidator.PerimeterLoaderTest do
     assert {:error, :file_not_found} = PerimeterLoader.get("/nonexistent.json", "pi-full")
   end
 
+  # ---------------------------------------------------------------------------
+  # Fix 5 — PerimeterLoader distinguishes error variants
+  # ---------------------------------------------------------------------------
+
+  describe "Fix 5: error variant :permission_denied" do
+    @tag :unix_permissions
+    test "unreadable file → {:error, :permission_denied}" do
+      path = "/tmp/dr-noperm-#{System.unique_integer()}.json"
+      File.write!(path, "[]")
+      File.chmod!(path, 0o000)
+
+      result =
+        try do
+          PerimeterLoader.list(path)
+        after
+          File.chmod!(path, 0o644)
+          File.rm!(path)
+        end
+
+      assert result == {:error, :permission_denied}
+    end
+
+    @tag :unix_permissions
+    test "unreadable file propagates through get/2" do
+      path = "/tmp/dr-noperm-get-#{System.unique_integer()}.json"
+      File.write!(path, "[]")
+      File.chmod!(path, 0o000)
+
+      result =
+        try do
+          PerimeterLoader.get(path, "any")
+        after
+          File.chmod!(path, 0o644)
+          File.rm!(path)
+        end
+
+      assert result == {:error, :permission_denied}
+    end
+  end
+
+  describe "Fix 5: error variant {:file_error, reason}" do
+    test "reading a directory path → {:error, {:file_error, _}}" do
+      dir = "/tmp/dr-dir-#{System.unique_integer()}"
+      File.mkdir_p!(dir)
+
+      result =
+        try do
+          PerimeterLoader.list(dir)
+        after
+          File.rmdir(dir)
+        end
+
+      assert match?({:error, {:file_error, _}}, result),
+             "expected {:error, {:file_error, _}}, got #{inspect(result)}"
+    end
+  end
+
   test "list/0 uses DR_PERIMETERS_PATH env var" do
     data = [%{"id" => "env-test", "host" => "pi", "apps" => ["openbao"], "canary" => true}]
     path = write_tmp_file(data)
