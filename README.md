@@ -1,19 +1,55 @@
-# Elixir Development Template (with mix2nix)
+# dr-validator
 
-Comprehensive Nix flake template for Elixir application development with Mix, mix2nix for reproducible builds, testing, and release packaging.
+Post-activation DR validation oracle for NixOS hosts. Runs browser-driven E2E tests against live services and produces a structured JSON report consumed by the weekly canary and the DR ISO post-activation flow.
 
-## Features
+## What it does
 
-- ✅ **Elixir and Erlang** latest stable versions from nixpkgs
-- ✅ **mix2nix** for reproducible, offline builds with locked dependencies
-- ✅ **Mix build system** for dependency management and builds
-- ✅ **Testing support** with ExUnit and code coverage
-- ✅ **Type checking** with Dialyzer
-- ✅ **Language server** (elixir-ls) for IDE integration
-- ✅ **Release packaging** with Mix releases
-- ✅ **Documentation generation** with ExDoc
-- ✅ **Phoenix support** ready (install Phoenix as dependency)
-- ✅ **Fully declarative and reproducible** builds with Nix
+After a disaster recovery restore (borg backup + nixos-rebuild switch), dr-validator answers: **did the restored services actually work?** It iterates over a perimeter spec (a list of apps to validate), runs a Wallaby browser test per app, and aggregates results into a versioned `report.json`.
+
+Two downstream consumers:
+
+- **Weekly canary** (`machines_conf` pi): `backup-restore-test.service` → restored VM2 → `dr-validator-run --perimeter <name>` → `report.json` → Prometheus pushgateway
+- **Real DR ISO** (`machines_conf`): post-`nixos-rebuild switch` activation hook → `dr-validator-run --perimeter <selected>` → TUI post-reboot summary screen
+
+## Quick start
+
+```bash
+git clone git@github-mstratsec:QuentinMallet/dr-validator.git
+cd dr-validator
+nix develop
+mix deps.get
+mix test
+```
+
+## Project structure
+
+```
+apps/
+  dr_validator/               # Core: AppValidator behaviour, Report/AppResult structs, runner
+  dr_validator_openbao/       # OpenBao validator (first concrete impl — in progress)
+docs/                         # mdBook documentation
+```
+
+## Read the docs
+
+```bash
+nix build .#doc
+# Open result/index.html
+```
+
+Or browse `docs/src/` directly.
+
+## Adding a new validator
+
+See [Adding a new validator](docs/src/adding-a-new-validator.md) in the docs.
+
+One sub-app per service, one PR per validator. Each sub-app implements the `DrValidator.AppValidator` behaviour.
+
+## Architecture
+
+Umbrella Elixir app. Each validated service lives in `apps/dr_validator_<name>/` and exports a module implementing `DrValidator.AppValidator`. The runner loads a perimeter spec, calls each validator, and writes `report.json` atomically.
+
+Full architecture and upstream decisions: `machines_conf:.omc/specs/deep-interview-dr-program.md`.
 
 ## What is mix2nix?
 
