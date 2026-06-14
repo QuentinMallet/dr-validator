@@ -150,7 +150,7 @@ defmodule DrValidator.RunnerTest do
   end
 
   test "report_writer fn is called with the finished report" do
-    perimeter = %Perimeter{id: "p1", apps: ["app1"]}
+    perimeter = %Perimeter{id: "p1", host: "test-host", apps: ["app1"], canary: true}
     test_pid = self()
     writer = fn report -> send(test_pid, {:written, report}); report end
 
@@ -163,7 +163,7 @@ defmodule DrValidator.RunnerTest do
   end
 
   test "each AppResult carries a non-nil duration_ms" do
-    perimeter = %Perimeter{id: "p1", apps: ["a", "b"]}
+    perimeter = %Perimeter{id: "p1", host: "test-host", apps: ["a", "b"], canary: true}
     report = Runner.run(perimeter, validator_lookup: uniform_lookup(FakePassedValidator))
     for result <- report.apps, do: assert(is_integer(result.duration_ms))
   end
