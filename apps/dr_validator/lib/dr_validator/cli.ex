@@ -1,25 +1,26 @@
 defmodule DrValidator.CLI do
   @moduledoc """
-  CLI entrypoint for escript invocation.
+  CLI entrypoint for escript and `mix dr_validator.run` invocation.
 
-  `main/1` is the escript entry point called with `System.argv()` by the
-  generated `dr-validator-run` binary. It is also invoked by the
-  `mix dr_validator.run` task so the two entrypoints share identical
-  arg-parsing and dispatch logic.
+  `main/1` parses `argv`, runs the validator pipeline, and returns an integer
+  exit code. It is called directly by the `mix dr_validator.run` Mix task and
+  by `DrValidator.EscriptMain.main/1` (which wraps it with `System.halt/1` so
+  the generated `dr-validator-run` binary exits with the correct `$?`).
 
   ## Exit codes
 
     - `0`  — all apps passed (`:passed`)
     - `1`  — at least one app failed, none partial (`:failed`)
     - `2`  — at least one app partial (`:partial`)
+    - `3`  — validation ran but the report could not be written to disk
     - `64` — usage error (missing required flag); sysexits.h EX_USAGE
 
   ## Flags
 
     - `--perimeter <id>`        (required) perimeter ID to validate
     - `--perimeters-path <p>`   override perimeters JSON file (default: env/system default)
-    - `--report-path <p>`       override report output path
-    - `--app-timeout-ms <n>`    per-app timeout in milliseconds
+    - `--report-path <p>`       override report output path (must be writable; exit 3 on failure)
+    - `--app-timeout-ms <n>`    per-app timeout in milliseconds (must be a positive integer > 0)
     - `--help`                  print usage and exit 0
   """
 
@@ -32,21 +33,29 @@ defmodule DrValidator.CLI do
     --perimeter <id>        Perimeter ID to validate (required)
     --perimeters-path <p>   Path to perimeters JSON (default: /etc/dr-perimeters.json)
     --report-path <p>       Path for JSON report output (default: /var/log/dr-validator/report.json)
-    --app-timeout-ms <n>    Per-app timeout in ms (default: 300000)
+    --app-timeout-ms <n>    Per-app timeout in ms, must be > 0 (default: 300000)
     --help                  Show this help
+
+  Exit codes:
+    0   All apps passed
+    1   At least one app failed
+    2   At least one app partial
+    3   Validation ran but report write failed (check --report-path permissions)
+    64  Usage error (missing flag, unknown option, or invalid value)
   """
 
   @ex_usage 64
+  @default_perimeters_path "/etc/dr-perimeters.json"
 
   # ---------------------------------------------------------------------------
   # Public API
   # ---------------------------------------------------------------------------
 
   @doc """
-  Escript entry point. Parses `argv`, runs the validator, returns exit code.
+  CLI entry point. Parses `argv`, runs the validator, returns exit code.
 
-  In escript context, call `System.halt(main(System.argv()))`.
-  In test context, call directly and assert on the returned integer.
+  In escript context, `DrValidator.EscriptMain.main/1` wraps this with
+  `System.halt/1`. In test context, call directly and assert on the integer.
   """
   @spec main([String.t()]) :: non_neg_integer()
   def main(argv) do
@@ -56,7 +65,7 @@ defmodule DrValidator.CLI do
         0
 
       {:error, :usage_error} ->
-        IO.puts(:stderr, "error: --perimeter is required\n")
+        IO.puts(:stderr, "error: invalid or missing arguments\n")
         IO.puts(:stderr, @usage)
         @ex_usage
 
@@ -69,13 +78,14 @@ defmodule DrValidator.CLI do
   Parse `argv` into an opts map.
 
   Returns:
-    - `:help`               — `--help` flag present
-    - `{:ok, opts}`         — valid args; opts has `:perimeter` (required) plus optional keys
-    - `{:error, :usage_error}` — `--perimeter` missing
+    - `:help`                   — `--help` flag present
+    - `{:ok, opts}`             — valid args; opts has `:perimeter` (required) plus optional keys
+    - `{:error, :usage_error}`  — `--perimeter` missing, unknown option present,
+                                  or `--app-timeout-ms` is not a positive integer
   """
   @spec parse_args([String.t()]) :: :help | {:ok, map()} | {:error, :usage_error}
   def parse_args(argv) do
-    {parsed, _rest, _invalid} =
+    {parsed, _rest, invalid} =
       OptionParser.parse(argv,
         strict: [
           perimeter: :string,
@@ -86,11 +96,19 @@ defmodule DrValidator.CLI do
         ]
       )
 
+    timeout = Keyword.get(parsed, :app_timeout_ms)
+
     cond do
       Keyword.get(parsed, :help) ->
         :help
 
+      invalid != [] ->
+        {:error, :usage_error}
+
       is_nil(Keyword.get(parsed, :perimeter)) ->
+        {:error, :usage_error}
+
+      not (is_nil(timeout) or timeout > 0) ->
         {:error, :usage_error}
 
       true ->
@@ -98,7 +116,7 @@ defmodule DrValidator.CLI do
           perimeter: Keyword.fetch!(parsed, :perimeter),
           perimeters_path: Keyword.get(parsed, :perimeters_path),
           report_path: Keyword.get(parsed, :report_path),
-          app_timeout_ms: Keyword.get(parsed, :app_timeout_ms)
+          app_timeout_ms: timeout
         }
 
         {:ok, opts}
@@ -120,6 +138,7 @@ defmodule DrValidator.CLI do
   defp run(opts) do
     perimeter_id = opts.perimeter
     perimeters_path = opts.perimeters_path
+    resolved_path = perimeters_path || System.get_env("DR_PERIMETERS_PATH", @default_perimeters_path)
 
     loader_args =
       if perimeters_path do
@@ -130,15 +149,23 @@ defmodule DrValidator.CLI do
 
     case apply(PerimeterLoader, :get, loader_args) do
       {:error, :not_found} ->
-        IO.puts(:stderr, "error: perimeter #{inspect(perimeter_id)} not found")
+        IO.puts(:stderr, "error: perimeter #{inspect(perimeter_id)} not found in #{resolved_path}")
         1
 
       {:error, :file_not_found} ->
-        IO.puts(:stderr, "error: perimeters file not found")
+        IO.puts(:stderr, "error: perimeters file not found: #{resolved_path}")
+        1
+
+      {:error, :permission_denied} ->
+        IO.puts(:stderr, "error: permission denied reading perimeters file: #{resolved_path}")
+        1
+
+      {:error, {:file_error, reason}} ->
+        IO.puts(:stderr, "error: reading perimeters file #{resolved_path}: #{inspect(reason)}")
         1
 
       {:error, :malformed} ->
-        IO.puts(:stderr, "error: perimeters file is malformed")
+        IO.puts(:stderr, "error: perimeters file is malformed: #{resolved_path}")
         1
 
       {:ok, perimeter} ->
@@ -147,19 +174,39 @@ defmodule DrValidator.CLI do
   end
 
   defp run_perimeter(perimeter, opts) do
+    unregistered = Enum.reject(perimeter.apps, &Apps.lookup/1)
+
+    if unregistered != [] do
+      IO.puts(
+        :stderr,
+        "warning: no validator registered for apps: #{Enum.join(unregistered, ", ")}"
+      )
+    end
+
     runner_opts =
       [validator_lookup: &Apps.lookup/1]
       |> maybe_put(:app_timeout_ms, opts.app_timeout_ms)
 
     report = Runner.run(perimeter, runner_opts)
 
-    write_report(report, opts.report_path)
+    case write_report(report, opts.report_path) do
+      :ok ->
+        exit_code_for(report.overall_status)
 
-    exit_code_for(report.overall_status)
+      {:error, reason} ->
+        IO.puts(
+          :stderr,
+          "error: failed to write report to #{opts.report_path || "(default path)"}: #{inspect(reason)}"
+        )
+
+        3
+    end
   end
 
-  defp write_report(report, nil), do: ReportWriter.write(report)
-  defp write_report(report, path), do: ReportWriter.write(report, path)
+  defp write_report(report, path) do
+    writer = Application.get_env(:dr_validator, :report_writer, ReportWriter)
+    if path, do: writer.write(report, path), else: writer.write(report)
+  end
 
   defp maybe_put(kw, _key, nil), do: kw
   defp maybe_put(kw, key, value), do: Keyword.put(kw, key, value)

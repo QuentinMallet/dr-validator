@@ -17,4 +17,12 @@ import Config
 #       metadata: [:user_id]
 #
 
+# Validator registry — maps app name strings to AppValidator modules.
+# Each sub-app that provides a validator registers itself here.
+# DrValidator.Apps.lookup/1 reads this at runtime and guards with
+# Code.ensure_loaded?/1 so absent sub-apps return nil gracefully.
+config :dr_validator, validators: %{
+  "openbao" => DrValidator.Apps.Openbao.RestoreTest
+}
+
 import_config "#{config_env()}.exs"

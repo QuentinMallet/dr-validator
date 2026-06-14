@@ -26,8 +26,8 @@ defmodule DrValidator.PerimeterLoader do
 
   @default_path "/etc/dr-perimeters.json"
 
-  @type load_error :: :file_not_found | :malformed
-  @type get_error  :: :file_not_found | :malformed | :not_found
+  @type load_error :: :file_not_found | :permission_denied | {:file_error, term()} | :malformed
+  @type get_error  :: :file_not_found | :permission_denied | {:file_error, term()} | :malformed | :not_found
 
   # ---------------------------------------------------------------------------
   # Public API
@@ -78,7 +78,8 @@ defmodule DrValidator.PerimeterLoader do
     case File.read(path) do
       {:ok, contents} -> {:ok, contents}
       {:error, :enoent} -> {:error, :file_not_found}
-      {:error, _reason} -> {:error, :file_not_found}
+      {:error, reason} when reason in [:eacces, :eperm] -> {:error, :permission_denied}
+      {:error, reason} -> {:error, {:file_error, reason}}
     end
   end
 
