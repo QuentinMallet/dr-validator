@@ -56,11 +56,25 @@ defmodule DrValidatorOpenbao.IntegrationTest do
         auth_headers()
       )
 
+    # Teardown: close the port then await the OS process exit.
+    # Port.close/1 sends EOF to the process but does not guarantee it has exited;
+    # we wait for the {:exit_status, _} message so the port's OS PID is reaped
+    # before the next test suite run. pkill is a fallback if the graceful close
+    # does not deliver exit_status within 2 s.
     on_exit(fn ->
       try do
         Port.close(bao_port)
       rescue
         ArgumentError -> :already_closed
+      end
+
+      receive do
+        {^bao_port, {:exit_status, _}} -> :ok
+      after
+        2000 ->
+          System.cmd("pkill", ["-f", "bao server -dev -dev-listen-address=127.0.0.1:18200"],
+            stderr_to_stdout: true
+          )
       end
     end)
 
