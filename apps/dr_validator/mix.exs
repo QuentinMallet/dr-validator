@@ -11,7 +11,6 @@ defmodule DrValidator.MixProject do
       lockfile: "../../mix.lock",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
-      escript: [main_module: DrValidator.EscriptMain, name: "dr-validator-run"],
       deps: deps()
     ]
   end
