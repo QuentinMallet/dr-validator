@@ -54,11 +54,17 @@ defmodule DrValidator.Runner do
     timeout_ms = Keyword.get(opts, :app_timeout_ms, @default_timeout_ms)
     lookup = build_lookup(opts)
     report_writer = Keyword.get(opts, :report_writer, &Function.identity/1)
+    # Compute once; the stripped map is identical for every app in the perimeter.
+    opts_map =
+      opts
+      |> Keyword.drop([:validators, :validator_lookup, :app_timeout_ms, :report_writer])
+      |> Map.new()
+
     started_at = DateTime.utc_now()
 
     app_results =
       Enum.map(perimeter.apps, fn app_name ->
-        run_app(app_name, lookup, timeout_ms, opts)
+        run_app(app_name, lookup, timeout_ms, opts_map)
       end)
 
     report =
@@ -88,7 +94,7 @@ defmodule DrValidator.Runner do
     end
   end
 
-  defp run_app(app_name, lookup, timeout_ms, opts) do
+  defp run_app(app_name, lookup, timeout_ms, opts_map) do
     validator = lookup.(app_name)
 
     if is_nil(validator) do
@@ -101,14 +107,13 @@ defmodule DrValidator.Runner do
         error_message: "no validator registered for #{inspect(app_name)}"
       }
     else
-      execute_validator(app_name, validator, timeout_ms, opts)
+      execute_validator(app_name, validator, timeout_ms, opts_map)
     end
   end
 
-  defp execute_validator(app_name, validator, timeout_ms, opts) do
+  defp execute_validator(app_name, validator, timeout_ms, opts_map) do
     t0 = System.monotonic_time(:millisecond)
     started_at = DateTime.utc_now()
-    opts_map = opts |> Keyword.drop([:validators, :validator_lookup, :app_timeout_ms, :report_writer]) |> Map.new()
 
     # Wrap in try/rescue so a validator that raises an exception returns a value
     # instead of propagating. EXIT signals from exit/1 are intentionally not
