@@ -96,34 +96,36 @@
                   platforms = platforms.unix;
                 };
               }).overrideAttrs (_old: {
-                # The project is an escript (apps/dr_validator/mix.exs has
-                # escript: [main_module: DrValidator.CLI, name: "dr-validator-run"]).
-                # mixRelease would run `mix release` which requires umbrella release
-                # config and produces an OTP release, not an escript. Override to
-                # compile everything then build the escript from the child app dir.
+                # Build the umbrella OTP release (includes both dr_validator and
+                # dr_validator_openbao sub-apps per the releases config in mix.exs).
+                # The escript distribution model was dropped because escript bundles
+                # only the sub-app it is built from, silently omitting sibling apps.
                 buildPhase = ''
                   runHook preBuild
                   mix compile --no-deps-check
-                  (cd apps/dr_validator && mix escript.build --no-deps-check)
                   runHook postBuild
                 '';
                 installPhase = ''
                   runHook preInstall
-                  mkdir -p "$out/bin" "$out/libexec"
-                  # Install raw escript to libexec (avoids beam auto-wrap hook in bin/)
-                  install -m755 apps/dr_validator/dr-validator-run "$out/libexec/dr-validator-run"
-                  # Write a shell wrapper that uses the absolute nix store path to escript
-                  # so the binary works without any PATH setup at runtime.
-                  # ${erlang} is Nix-interpolated to the store path; $out expands in the
-                  # installPhase shell; "$@" inside single quotes is printed literally.
-                  printf '#!/bin/sh\nexec %s/bin/escript %s/libexec/dr-validator-run "$@"\n' \
-                    '${erlang}' "$out" > "$out/bin/dr-validator-run"
+                  # --no-compile: deps are already compiled by the Nix configurePhase
+                  # (pre-built rebar3/mix packages symlinked into _build/prod/lib/).
+                  # Without this flag, `mix release` would invoke rebar3 to recompile
+                  # rebar3 deps (e.g. unicode_util_compat) — rebar3 then fails trying
+                  # to store its compilation DAG inside the read-only Nix store.
+                  mix release dr_validator --path "$out" --overwrite --no-compile
+                  # One-shot CLI wrapper: evaluates DrValidator.EscriptMain.main/1
+                  # inside the release node, propagating the integer exit code via
+                  # System.halt/1. System.argv() inside `eval` receives the args
+                  # passed after the "--" separator.
+                  cat > "$out/bin/dr-validator-run" <<'WRAPPER'
+                  #!/usr/bin/env bash
+                  exec "$(dirname "$0")/dr_validator" eval "DrValidator.EscriptMain.main(System.argv())" -- "$@"
+                  WRAPPER
                   chmod +x "$out/bin/dr-validator-run"
                   runHook postInstall
                 '';
-                # Clear postFixup — the default mixRelease postFixup wraps bin/ scripts
-                # with gawk/grep/sed but not erlang; since we write an explicit wrapper
-                # above with the absolute erlang path, no postFixup wrapping is needed.
+                # Clear postFixup — default mixRelease postFixup rewraps bin/ scripts
+                # with env-var injection we do not need for a self-contained release.
                 postFixup = "";
               });
           };
