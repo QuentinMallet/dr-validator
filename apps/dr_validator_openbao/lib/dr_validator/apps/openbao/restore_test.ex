@@ -32,9 +32,11 @@ defmodule DrValidator.Apps.Openbao.RestoreTest do
   @impl DrValidator.AppValidator
   def run(opts) do
     base_url = Map.get(opts, :base_url, "http://127.0.0.1:8200")
+    allow_remote = Map.get(opts, :allow_remote, false)
     t0 = System.monotonic_time(:millisecond)
 
-    with {:ok, token} <- resolve_token(opts),
+    with :ok <- check_remote_allowed(base_url, allow_remote),
+         {:ok, token} <- resolve_token(opts),
          :ok <- check_health(base_url),
          :ok <- check_mounts(base_url, token),
          :ok <- check_canary(base_url, token) do
@@ -50,6 +52,29 @@ defmodule DrValidator.Apps.Openbao.RestoreTest do
   # ------------------------------------------------------------------
 
   defp elapsed(t0), do: System.monotonic_time(:millisecond) - t0
+
+  # Rejects non-localhost base_url unless :allow_remote is true. This validator
+  # is designed for post-activation checks against a locally-running OpenBao
+  # instance; remote targets require explicit opt-in to prevent accidental
+  # production hits during DR validation.
+  defp check_remote_allowed(_base_url, true), do: :ok
+
+  defp check_remote_allowed(base_url, false) do
+    if localhost_url?(base_url) do
+      :ok
+    else
+      {:error, "remote base_url requires :allow_remote opt (got #{inspect(base_url)})"}
+    end
+  end
+
+  @localhost_hosts ~w[127.0.0.1 localhost ::1]
+
+  defp localhost_url?(base_url) do
+    case URI.parse(base_url) do
+      %URI{host: host} when host in @localhost_hosts -> true
+      _ -> false
+    end
+  end
 
   # Resolves the Vault token: :token opt wins, then DR_OPENBAO_TOKEN env var.
   # Returns {:error, msg} (fail-closed) if neither source is configured.
