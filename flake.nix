@@ -17,9 +17,11 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        # Elixir 1.17 + Erlang 27 — pinned minor version for reproducibility
+        # Elixir 1.18 + Erlang 27 — pinned minor version for reproducibility
+        # Note: elixir_1_17 is incompatible with Hex 2.4.0 (nixpkgs ships 2.4.0 for all
+        # beam package sets as of this nixpkgs rev); use 1.18 which is the native pairing.
         beamPackages = pkgs.beam.packages.erlang_27;
-        elixir = beamPackages.elixir_1_17;
+        elixir = beamPackages.elixir_1_18;
         erlang = beamPackages.erlang;
 
         hasMixNix = builtins.pathExists ./mix.nix;
