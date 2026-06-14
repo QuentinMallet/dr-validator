@@ -27,10 +27,12 @@ defmodule DrValidator.Runner do
   ## Concurrency model
 
   Each app validator runs inside a `Task.async` call so that `:app_timeout_ms`
-  can be enforced with `Task.yield` + `Task.shutdown(:brutal_kill)`. The body
-  is wrapped in try/rescue so that a crashing validator never propagates an
-  EXIT signal to the caller; instead the result is captured as a `:failed`
-  `AppResult`. Execution order matches `perimeter.apps` (sequential Enum.map).
+  can be enforced with `Task.yield` + `Task.shutdown(:brutal_kill)`. The task
+  body is wrapped in `try/rescue` so that exceptions are captured as `:failed`
+  `AppResult` values. EXIT signals (e.g. `exit/1` in a validator) are not caught
+  in the task body; when the caller traps exits, `Task.yield` surfaces these as
+  `{:exit, reason}` which is handled by the dedicated clause below. Execution
+  order matches `perimeter.apps` (sequential Enum.map).
   """
 
   alias DrValidator.{AppResult, Perimeter, Report}
@@ -52,11 +54,17 @@ defmodule DrValidator.Runner do
     timeout_ms = Keyword.get(opts, :app_timeout_ms, @default_timeout_ms)
     lookup = build_lookup(opts)
     report_writer = Keyword.get(opts, :report_writer, &Function.identity/1)
+    # Compute once; the stripped map is identical for every app in the perimeter.
+    opts_map =
+      opts
+      |> Keyword.drop([:validators, :validator_lookup, :app_timeout_ms, :report_writer])
+      |> Map.new()
+
     started_at = DateTime.utc_now()
 
     app_results =
       Enum.map(perimeter.apps, fn app_name ->
-        run_app(app_name, lookup, timeout_ms, opts)
+        run_app(app_name, lookup, timeout_ms, opts_map)
       end)
 
     report =
@@ -86,7 +94,7 @@ defmodule DrValidator.Runner do
     end
   end
 
-  defp run_app(app_name, lookup, timeout_ms, opts) do
+  defp run_app(app_name, lookup, timeout_ms, opts_map) do
     validator = lookup.(app_name)
 
     if is_nil(validator) do
@@ -99,25 +107,24 @@ defmodule DrValidator.Runner do
         error_message: "no validator registered for #{inspect(app_name)}"
       }
     else
-      execute_validator(app_name, validator, timeout_ms, opts)
+      execute_validator(app_name, validator, timeout_ms, opts_map)
     end
   end
 
-  defp execute_validator(app_name, validator, timeout_ms, opts) do
+  defp execute_validator(app_name, validator, timeout_ms, opts_map) do
     t0 = System.monotonic_time(:millisecond)
     started_at = DateTime.utc_now()
-    opts_map = opts |> Keyword.drop([:validators, :validator_lookup, :app_timeout_ms, :report_writer]) |> Map.new()
 
-    # Wrap in try/rescue so a crashing validator returns a value instead of
-    # sending an EXIT signal to the linked caller.
+    # Wrap in try/rescue so a validator that raises an exception returns a value
+    # instead of propagating. EXIT signals from exit/1 are intentionally not
+    # caught here: they cause the task process to exit, which Task.yield surfaces
+    # as {:exit, reason} (when the caller traps exits) and handled below.
     task =
       Task.async(fn ->
         try do
           validator.run(opts_map)
         rescue
           e -> {:crashed, Exception.message(e)}
-        catch
-          kind, reason -> {:crashed, "#{kind}: #{inspect(reason)}"}
         end
       end)
 

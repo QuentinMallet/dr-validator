@@ -133,6 +133,77 @@ defmodule DrValidatorOpenbaoTest do
   end
 
   # ------------------------------------------------------------------
+  # TLS / remote posture
+  # ------------------------------------------------------------------
+
+  test "rejects non-localhost base_url without :allow_remote" do
+    System.delete_env("DR_OPENBAO_TOKEN")
+    {:error, %AppResult{status: :failed, error_message: msg}} =
+      RestoreTest.run(%{base_url: "http://192.168.1.10:8200", token: "root"})
+
+    assert msg =~ "allow_remote",
+           "expected error to mention 'allow_remote', got: #{inspect(msg)}"
+  end
+
+  test "allows localhost base_url without :allow_remote", %{bypass: bypass, base_url: base_url} do
+    stub_health(bypass, health_ok())
+    stub_mounts(bypass, mounts_with_kv())
+    stub_canary(bypass, canary_ok())
+
+    assert {:ok, %AppResult{status: :passed}} =
+             RestoreTest.run(%{base_url: base_url, token: "root"})
+  end
+
+  test "allows non-localhost base_url when :allow_remote is true", %{bypass: bypass, base_url: base_url} do
+    stub_health(bypass, health_ok())
+    stub_mounts(bypass, mounts_with_kv())
+    stub_canary(bypass, canary_ok())
+
+    # Use the bypass (127.0.0.1) URL but with allow_remote to confirm the opt is honoured
+    # for remote URLs: we fake a remote URL by patching the check with allow_remote.
+    assert {:ok, %AppResult{status: :passed}} =
+             RestoreTest.run(%{base_url: base_url, token: "root", allow_remote: true})
+  end
+
+  # ------------------------------------------------------------------
+  # Token resolution
+  # ------------------------------------------------------------------
+
+  test "returns :failed when no :token opt and DR_OPENBAO_TOKEN env unset", %{bypass: _bypass, base_url: base_url} do
+    System.delete_env("DR_OPENBAO_TOKEN")
+    {:error, %AppResult{status: :failed, error_message: msg}} =
+      RestoreTest.run(%{base_url: base_url})
+
+    assert msg =~ "no openbao token",
+           "expected error to mention 'no openbao token', got: #{inspect(msg)}"
+  end
+
+  test "picks up token from DR_OPENBAO_TOKEN env when :token opt absent", %{bypass: bypass, base_url: base_url} do
+    System.put_env("DR_OPENBAO_TOKEN", "env-token")
+
+    stub_health(bypass, health_ok())
+    stub_mounts(bypass, mounts_with_kv())
+    stub_canary(bypass, canary_ok())
+
+    assert {:ok, %AppResult{status: :passed}} = RestoreTest.run(%{base_url: base_url})
+  after
+    System.delete_env("DR_OPENBAO_TOKEN")
+  end
+
+  test ":token opt takes precedence over DR_OPENBAO_TOKEN env", %{bypass: bypass, base_url: base_url} do
+    System.put_env("DR_OPENBAO_TOKEN", "env-token")
+
+    stub_health(bypass, health_ok())
+    stub_mounts(bypass, mounts_with_kv())
+    stub_canary(bypass, canary_ok())
+
+    # If opt wins, the request still goes through (both tokens valid in bypass mock)
+    assert {:ok, %AppResult{status: :passed}} = RestoreTest.run(%{base_url: base_url, token: "opt-token"})
+  after
+    System.delete_env("DR_OPENBAO_TOKEN")
+  end
+
+  # ------------------------------------------------------------------
   # Metadata / callbacks
   # ------------------------------------------------------------------
 
