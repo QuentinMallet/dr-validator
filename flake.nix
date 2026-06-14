@@ -81,17 +81,51 @@
             generate-mix-nix = generateMixNixScript;
           }
           // pkgs.lib.optionalAttrs hasMixNix {
-            default = beamPackages.mixRelease {
-              pname = "dr-validator";
-              version = "0.1.0";
-              src = ./.;
-              mixEnv = "prod";
-              mixDeps = import ./mix.nix { inherit beamPackages; };
-              meta = with pkgs.lib; {
-                description = "DR test automation tool";
-                platforms = platforms.unix;
-              };
-            };
+            default =
+              let
+                mixNixDeps = import ./mix.nix { inherit (pkgs) lib; inherit beamPackages; };
+              in
+              (beamPackages.mixRelease {
+                pname = "dr-validator";
+                version = "0.1.0";
+                src = ./.;
+                mixEnv = "prod";
+                inherit mixNixDeps;
+                meta = with pkgs.lib; {
+                  description = "DR test automation tool";
+                  platforms = platforms.unix;
+                };
+              }).overrideAttrs (_old: {
+                # The project is an escript (apps/dr_validator/mix.exs has
+                # escript: [main_module: DrValidator.CLI, name: "dr-validator-run"]).
+                # mixRelease would run `mix release` which requires umbrella release
+                # config and produces an OTP release, not an escript. Override to
+                # compile everything then build the escript from the child app dir.
+                buildPhase = ''
+                  runHook preBuild
+                  mix compile --no-deps-check
+                  (cd apps/dr_validator && mix escript.build --no-deps-check)
+                  runHook postBuild
+                '';
+                installPhase = ''
+                  runHook preInstall
+                  mkdir -p "$out/bin" "$out/libexec"
+                  # Install raw escript to libexec (avoids beam auto-wrap hook in bin/)
+                  install -m755 apps/dr_validator/dr-validator-run "$out/libexec/dr-validator-run"
+                  # Write a shell wrapper that uses the absolute nix store path to escript
+                  # so the binary works without any PATH setup at runtime.
+                  # ${erlang} is Nix-interpolated to the store path; $out expands in the
+                  # installPhase shell; "$@" inside single quotes is printed literally.
+                  printf '#!/bin/sh\nexec %s/bin/escript %s/libexec/dr-validator-run "$@"\n' \
+                    '${erlang}' "$out" > "$out/bin/dr-validator-run"
+                  chmod +x "$out/bin/dr-validator-run"
+                  runHook postInstall
+                '';
+                # Clear postFixup — the default mixRelease postFixup wraps bin/ scripts
+                # with gawk/grep/sed but not erlang; since we write an explicit wrapper
+                # above with the absolute erlang path, no postFixup wrapping is needed.
+                postFixup = "";
+              });
           };
 
         devShells.default = pkgs.mkShell {
