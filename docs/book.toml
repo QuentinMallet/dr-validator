@@ -1,6 +1,6 @@
 [book]
-title = "Project Documentation"
-authors = []
+title = "dr-validator: DR program post-activation validator"
+authors = ["fbeast"]
 src = "src"
 
 [build]
