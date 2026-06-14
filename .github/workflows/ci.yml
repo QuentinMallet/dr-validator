@@ -1,0 +1,60 @@
+name: CI
+
+# Integration tests (mix test --only integration) and Wallaby browser tests
+# (--only wallaby) are excluded: both require a live OpenBao server on port
+# 18200 and a running browser / chromedriver, which are not available in the
+# GitHub Actions runner environment.
+#
+# Dialyzer is skipped: the project has no dialyzer PLT configuration (no
+# .dialyzer_ignore.exs, no plt_add_apps in mix.exs). Add a `mix-dialyzer`
+# job once plt config exists.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  flake-check:
+    name: nix flake check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - run: nix flake check --no-build
+
+  nix-build:
+    name: nix build + smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Build default package
+        run: nix build .#default
+      - name: Smoke test — assert binary exits 0 on --help
+        run: ./result/bin/dr-validator-run --help
+
+  mix-test:
+    name: mix test (unit only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Run unit tests
+        run: |
+          nix develop --command bash -c '
+            mix deps.get
+            mix test --exclude wallaby --exclude integration
+          '
+
+  mix-format:
+    name: mix format check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Check formatting
+        run: nix develop --command mix format --check-formatted
