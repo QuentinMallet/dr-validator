@@ -107,6 +107,9 @@
             # Local dev: secrets vault + OIDC provider
             pkgs.openbao
             pkgs.dex
+            # Browser-driven tests (Wallaby)
+            pkgs.chromium
+            pkgs.chromedriver
           ];
 
           shellHook = ''
