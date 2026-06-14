@@ -28,6 +28,10 @@ defmodule Mix.Tasks.DrValidator.Run do
 
   @impl Mix.Task
   def run(argv) do
+    # Trap EXIT signals so Task.async-linked validator processes that call
+    # exit/1 surface as {:exit, reason} in Task.yield rather than killing
+    # the mix task process before the yield clause can handle them.
+    Process.flag(:trap_exit, true)
     rc = DrValidator.CLI.main(argv)
 
     if rc != 0 do
