@@ -45,6 +45,7 @@ defmodule DrValidator.CLI do
   """
 
   @ex_usage 64
+  @default_perimeters_path "/etc/dr-perimeters.json"
 
   # ---------------------------------------------------------------------------
   # Public API
@@ -137,6 +138,7 @@ defmodule DrValidator.CLI do
   defp run(opts) do
     perimeter_id = opts.perimeter
     perimeters_path = opts.perimeters_path
+    resolved_path = perimeters_path || System.get_env("DR_PERIMETERS_PATH", @default_perimeters_path)
 
     loader_args =
       if perimeters_path do
@@ -147,15 +149,23 @@ defmodule DrValidator.CLI do
 
     case apply(PerimeterLoader, :get, loader_args) do
       {:error, :not_found} ->
-        IO.puts(:stderr, "error: perimeter #{inspect(perimeter_id)} not found")
+        IO.puts(:stderr, "error: perimeter #{inspect(perimeter_id)} not found in #{resolved_path}")
         1
 
       {:error, :file_not_found} ->
-        IO.puts(:stderr, "error: perimeters file not found")
+        IO.puts(:stderr, "error: perimeters file not found: #{resolved_path}")
+        1
+
+      {:error, :permission_denied} ->
+        IO.puts(:stderr, "error: permission denied reading perimeters file: #{resolved_path}")
+        1
+
+      {:error, {:file_error, reason}} ->
+        IO.puts(:stderr, "error: reading perimeters file #{resolved_path}: #{inspect(reason)}")
         1
 
       {:error, :malformed} ->
-        IO.puts(:stderr, "error: perimeters file is malformed")
+        IO.puts(:stderr, "error: perimeters file is malformed: #{resolved_path}")
         1
 
       {:ok, perimeter} ->
@@ -164,6 +174,15 @@ defmodule DrValidator.CLI do
   end
 
   defp run_perimeter(perimeter, opts) do
+    unregistered = Enum.reject(perimeter.apps, &Apps.lookup/1)
+
+    if unregistered != [] do
+      IO.puts(
+        :stderr,
+        "warning: no validator registered for apps: #{Enum.join(unregistered, ", ")}"
+      )
+    end
+
     runner_opts =
       [validator_lookup: &Apps.lookup/1]
       |> maybe_put(:app_timeout_ms, opts.app_timeout_ms)
