@@ -20,7 +20,7 @@ defmodule DrValidator.CLI do
     - `--perimeter <id>`        (required) perimeter ID to validate
     - `--perimeters-path <p>`   override perimeters JSON file (default: env/system default)
     - `--report-path <p>`       override report output path (must be writable; exit 3 on failure)
-    - `--app-timeout-ms <n>`    per-app timeout in milliseconds
+    - `--app-timeout-ms <n>`    per-app timeout in milliseconds (must be a positive integer > 0)
     - `--help`                  print usage and exit 0
   """
 
@@ -33,7 +33,7 @@ defmodule DrValidator.CLI do
     --perimeter <id>        Perimeter ID to validate (required)
     --perimeters-path <p>   Path to perimeters JSON (default: /etc/dr-perimeters.json)
     --report-path <p>       Path for JSON report output (default: /var/log/dr-validator/report.json)
-    --app-timeout-ms <n>    Per-app timeout in ms (default: 300000)
+    --app-timeout-ms <n>    Per-app timeout in ms, must be > 0 (default: 300000)
     --help                  Show this help
 
   Exit codes:
@@ -41,7 +41,7 @@ defmodule DrValidator.CLI do
     1   At least one app failed
     2   At least one app partial
     3   Validation ran but report write failed (check --report-path permissions)
-    64  Usage error (missing required flag)
+    64  Usage error (missing flag, unknown option, or invalid value)
   """
 
   @ex_usage 64
@@ -64,7 +64,7 @@ defmodule DrValidator.CLI do
         0
 
       {:error, :usage_error} ->
-        IO.puts(:stderr, "error: --perimeter is required\n")
+        IO.puts(:stderr, "error: invalid or missing arguments\n")
         IO.puts(:stderr, @usage)
         @ex_usage
 
@@ -77,13 +77,14 @@ defmodule DrValidator.CLI do
   Parse `argv` into an opts map.
 
   Returns:
-    - `:help`               — `--help` flag present
-    - `{:ok, opts}`         — valid args; opts has `:perimeter` (required) plus optional keys
-    - `{:error, :usage_error}` — `--perimeter` missing
+    - `:help`                   — `--help` flag present
+    - `{:ok, opts}`             — valid args; opts has `:perimeter` (required) plus optional keys
+    - `{:error, :usage_error}`  — `--perimeter` missing, unknown option present,
+                                  or `--app-timeout-ms` is not a positive integer
   """
   @spec parse_args([String.t()]) :: :help | {:ok, map()} | {:error, :usage_error}
   def parse_args(argv) do
-    {parsed, _rest, _invalid} =
+    {parsed, _rest, invalid} =
       OptionParser.parse(argv,
         strict: [
           perimeter: :string,
@@ -94,11 +95,19 @@ defmodule DrValidator.CLI do
         ]
       )
 
+    timeout = Keyword.get(parsed, :app_timeout_ms)
+
     cond do
       Keyword.get(parsed, :help) ->
         :help
 
+      invalid != [] ->
+        {:error, :usage_error}
+
       is_nil(Keyword.get(parsed, :perimeter)) ->
+        {:error, :usage_error}
+
+      not (is_nil(timeout) or timeout > 0) ->
         {:error, :usage_error}
 
       true ->
@@ -106,7 +115,7 @@ defmodule DrValidator.CLI do
           perimeter: Keyword.fetch!(parsed, :perimeter),
           perimeters_path: Keyword.get(parsed, :perimeters_path),
           report_path: Keyword.get(parsed, :report_path),
-          app_timeout_ms: Keyword.get(parsed, :app_timeout_ms)
+          app_timeout_ms: timeout
         }
 
         {:ok, opts}
