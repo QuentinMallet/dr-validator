@@ -16,6 +16,10 @@ defmodule DrValidator.EscriptMain do
   """
   @spec main([String.t()]) :: no_return()
   def main(argv) do
+    # Trap EXIT signals so Task.async-linked validator processes that call
+    # exit/1 surface as {:exit, reason} in Task.yield rather than killing
+    # the CLI process before the yield clause can handle them.
+    Process.flag(:trap_exit, true)
     System.halt(DrValidator.CLI.main(argv))
   end
 end

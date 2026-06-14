@@ -12,8 +12,11 @@ end
 
 defmodule DrValidator.CLIFixTest do
   @moduledoc """
-  Tests for post-impl review fixes: escript exit code, ReportWriter error surface,
+  Tests for post-impl review fixes: ReportWriter error surface,
   arg validation, and unregistered-app warnings.
+
+  Binary smoke tests (--help exits 0, unknown perimeter exits non-zero) are
+  covered by the nix-build CI job which runs ./result/bin/dr-validator-run.
   """
   use ExUnit.Case, async: false
   use ExUnitProperties
@@ -21,8 +24,6 @@ defmodule DrValidator.CLIFixTest do
   import ExUnit.CaptureIO
 
   alias DrValidator.CLI
-
-  @wt Path.expand("../../../..", __DIR__)
 
   defp write_perimeters(perimeters) do
     path = Path.join(System.tmp_dir!(), "dr-test-#{System.unique_integer()}.json")
@@ -44,31 +45,6 @@ defmodule DrValidator.CLIFixTest do
         do: Application.put_env(:dr_validator, :report_writer, original),
         else: Application.delete_env(:dr_validator, :report_writer)
     end
-  end
-
-  # ---------------------------------------------------------------------------
-  # Fix 1 — escript exits with correct OS code
-  # ---------------------------------------------------------------------------
-
-  @tag :escript
-  test "escript exits non-zero when perimeter not found" do
-    escript = Path.join(@wt, "apps/dr_validator/dr-validator-run")
-    tmp = write_perimeters([])
-
-    {_out, rc} =
-      System.cmd(escript, ["--perimeter", "nonexistent", "--perimeters-path", tmp],
-        stderr_to_stdout: true
-      )
-
-    rm(tmp)
-    assert rc != 0, "expected non-zero exit code from escript, got #{rc}"
-  end
-
-  @tag :escript
-  test "escript exits 0 on --help" do
-    escript = Path.join(@wt, "apps/dr_validator/dr-validator-run")
-    {_out, rc} = System.cmd(escript, ["--help"], stderr_to_stdout: true)
-    assert rc == 0
   end
 
   # ---------------------------------------------------------------------------
