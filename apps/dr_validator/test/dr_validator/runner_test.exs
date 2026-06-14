@@ -66,7 +66,7 @@ defmodule DrValidator.RunnerTest do
     gen all id <- StreamData.string(:alphanumeric, min_length: 1),
             apps <- StreamData.list_of(app_name_gen(), min_length: 1, max_length: 5) do
       # Deduplicate to keep the "exactly once" property tractable.
-      %Perimeter{id: id, apps: Enum.uniq(apps)}
+      %Perimeter{id: id, host: "test-host", apps: Enum.uniq(apps), canary: true}
     end
   end
 
@@ -136,14 +136,14 @@ defmodule DrValidator.RunnerTest do
   # ---------------------------------------------------------------------------
 
   test "uses :validators map when :validator_lookup is not provided" do
-    perimeter = %Perimeter{id: "p1", apps: ["openbao"]}
+    perimeter = %Perimeter{id: "p1", host: "test-host", apps: ["openbao"], canary: true}
     report = Runner.run(perimeter, validators: %{"openbao" => FakePassedValidator})
     assert length(report.apps) == 1
     assert hd(report.apps).status == :passed
   end
 
   test "missing validator entry yields :failed AppResult mentioning the app name" do
-    perimeter = %Perimeter{id: "p1", apps: ["unknown_app"]}
+    perimeter = %Perimeter{id: "p1", host: "test-host", apps: ["unknown_app"], canary: true}
     report = Runner.run(perimeter, validators: %{})
     assert hd(report.apps).status == :failed
     assert hd(report.apps).error_message =~ "unknown_app"
