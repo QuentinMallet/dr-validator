@@ -1,9 +1,9 @@
 name: CI
 
-# Integration tests (mix test --only integration) and Wallaby browser tests
-# (--only wallaby) are excluded: both require a live OpenBao server on port
-# 18200 and a running browser / chromedriver, which are not available in the
-# GitHub Actions runner environment.
+# Integration tests (mix test --only integration), Wallaby browser tests
+# (--only wallaby), and escript-execution tests (--only escript) are excluded:
+# integration needs live OpenBao on port 18200, wallaby needs browser /
+# chromedriver, escript needs a pre-built ./dr-validator-run binary.
 #
 # Dialyzer is skipped: the project has no dialyzer PLT configuration (no
 # .dialyzer_ignore.exs, no plt_add_apps in mix.exs). Add a `mix-dialyzer`
@@ -46,7 +46,7 @@ jobs:
         run: |
           nix develop --command bash -c '
             mix deps.get
-            mix test --exclude wallaby --exclude integration
+            mix test --exclude wallaby --exclude integration --exclude escript
           '
 
   mix-format:
