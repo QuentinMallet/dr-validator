@@ -1,33 +1,21 @@
 defmodule DrValidator.Apps do
   @moduledoc """
-  Registry mapping app names to their validator modules.
+  Registry mapping app names to their AppValidator implementation modules.
 
-  Each entry maps an app name (as it appears in the perimeter JSON) to the
-  module that implements `AppValidator` behaviour for that app.
-
-  ## Stub state
-
-  The registry is currently empty. The openbao validator
-  (`DrValidator.Apps.Openbao.RestoreTest`) is implemented in the
-  `dr_validator_openbao` umbrella app and will be registered there via the
-  `:validator_lookup` injection point in the CLI. Registry entries are added
-  as each app validator is implemented.
-
-  ## Usage
-
-  Pass `validator_lookup: &DrValidator.Apps.lookup/1` in Runner opts, or
-  use `DrValidator.CLI` which wires this automatically.
+  Validator modules live in separate umbrella sub-apps (e.g. `dr_validator_openbao`).
+  Referencing them here as atoms avoids a compile-time circular dependency while
+  still enabling callers to resolve validators by name at runtime.
   """
 
-  @registry %{}
+  @registry %{
+    "openbao" => DrValidator.Apps.Openbao.RestoreTest
+  }
 
-  @doc """
-  Look up the validator module for `app_name`.
-
-  Returns the module if registered, `nil` otherwise.
-  Runner treats `nil` as "no validator registered" and emits a `:failed`
-  AppResult for that app.
-  """
+  @doc "Look up a validator module by app name. Returns `nil` if not registered."
   @spec lookup(String.t()) :: module() | nil
-  def lookup(app_name), do: Map.get(@registry, app_name)
+  def lookup(name), do: Map.get(@registry, name)
+
+  @doc "Return all registered validators as a `name => module` map."
+  @spec all() :: %{String.t() => module()}
+  def all, do: @registry
 end

@@ -4,7 +4,7 @@ defmodule DrValidator.Umbrella.MixProject do
   def project do
     [
       apps_path: "apps",
-      apps: [:dr_validator],
+      apps: [:dr_validator, :dr_validator_openbao],
       version: "0.1.0",
       start_permanent: Mix.env() == :prod,
       deps: deps()
