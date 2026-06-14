@@ -1,9 +1,9 @@
 name: CI
 
-# Integration tests (mix test --only integration), Wallaby browser tests
-# (--only wallaby), and escript-execution tests (--only escript) are excluded:
+# Integration tests (mix test --only integration) and Wallaby browser tests
+# (--only wallaby) are excluded from the mix-test job:
 # integration needs live OpenBao on port 18200, wallaby needs browser /
-# chromedriver, escript needs a pre-built ./dr-validator-run binary.
+# chromedriver. Binary smoke tests run in the nix-build job instead.
 #
 # Dialyzer is skipped: the project has no dialyzer PLT configuration (no
 # .dialyzer_ignore.exs, no plt_add_apps in mix.exs). Add a `mix-dialyzer`

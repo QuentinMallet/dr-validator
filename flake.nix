@@ -119,7 +119,9 @@
                   # passed after the "--" separator.
                   cat > "$out/bin/dr-validator-run" <<'WRAPPER'
                   #!/usr/bin/env bash
-                  exec "$(dirname "$0")/dr_validator" eval "DrValidator.EscriptMain.main(System.argv())" -- "$@"
+                  # The release `eval` command includes the "--" separator as the first
+                  # element of System.argv(). Use tl/1 to drop it before dispatching.
+                  exec "$(dirname "$0")/dr_validator" eval "DrValidator.EscriptMain.main(tl(System.argv()))" -- "$@"
                   WRAPPER
                   chmod +x "$out/bin/dr-validator-run"
                   runHook postInstall
